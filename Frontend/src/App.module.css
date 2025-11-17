@@ -1,3 +1,6 @@
+/* Import Press Start 2P font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
 /* Define the new color palette: Green and White (Primary), Silver and Black (Secondary) */
 :root {
     --uh-green: #008751; /* Primary Green (Forest Green) */

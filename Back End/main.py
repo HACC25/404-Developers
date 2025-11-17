@@ -8,23 +8,61 @@ import re
 import copy
 import math
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
-model = SentenceTransformer("all-mpnet-base-v2")
+
+# Enable CORS for frontend development server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Load model at startup
+print("Initializing SentenceTransformer model...", flush=True)
+model = None
+
+def get_model():
+    """Lazy load the model on first use"""
+    global model
+    if model is None:
+        try:
+            print("Loading SentenceTransformer model for first time...", flush=True)
+            model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
+            print("Model loaded successfully", flush=True)
+        except Exception as e:
+            print(f"Error loading model: {e}", flush=True)
+            raise
+    return model
+
+@app.get("/jobs")
+async def get_jobs():
+    """Get list of all available job titles from SOC"""
+    with open("detailed_occupations.json", "r", encoding="utf-8") as f:
+        jobs = json.load(f)
+    job_titles = [job["SOC Title"] for job in jobs]
+    return {"jobs": job_titles}
 
 @app.get("/pathway/{job1}/{job2}")
-def get_pathway(job1: str, job2: str):
+async def get_pathway(job1: str, job2: str):
     with open("detailed_occupations.json", "r",  encoding="utf-8") as f:
         jobs = json.load(f)
-        job1Verified = False
-        job2Verified = False
-    for job in jobs:
+        job1Index = None
+        job2Index = None
+    
+    # Find the indices of the jobs
+    for idx, job in enumerate(jobs):
         if job["SOC Title"] == job1:
-            job1Verified = True
-            job1 = jobs.index(job)
+            job1Index = idx
         if job["SOC Title"] == job2:
-            job2Verified = True
-            job2 = jobs.index(job)
+            job2Index = idx
+    
+    # If jobs not found, return error
+    if job1Index is None or job2Index is None:
+        return {"error": "Job title not found", "job1": job1, "job2": job2}
 
     #for cos similarity
     def objectiveSkillIndex(skillName):
@@ -68,10 +106,10 @@ def get_pathway(job1: str, job2: str):
     query = "Web and Digital Interface Designers: Design digital user interfaces or websites. Develop and test layouts, interfaces, functionality, and navigation menus to ensure compatibility and usability across browsers or devices. May use web framework applications as well as client-side code and processes. May evaluate web design following web and accessibility standards, and may analyze web use metrics and optimize websites for marketability and search engine ranking. May design and test interfaces that facilitate the human-computer interaction and maximize the usability of digital devices, websites, and software with a focus on aesthetics and design. May create graphics used in websites and manage website content and links. Excludes “Special Effects Artists and Animators” (27-1014) and “Graphic Designers” (27-1024)."
 
     
-    print(f"{jobs[job]["SOC Title"]}: {jobs[job]["SOC Definition"]}")
+    print(f"{jobs[job1Index]["SOC Title"]}: {jobs[job1Index]["SOC Definition"]}")
 
-    query = f"{jobs[job]["SOC Title"]}: {jobs[job]["SOC Definition"]}"
-    query2 = f"{jobs[job2]["SOC Title"]}: {jobs[job2]["SOC Definition"]}"
+    query = f"{jobs[job1Index]["SOC Title"]}: {jobs[job1Index]["SOC Definition"]}"
+    query2 = f"{jobs[job2Index]["SOC Title"]}: {jobs[job2Index]["SOC Definition"]}"
 
     queryEncoded = model.encode(query, normalize_embeddings=True)
     queryCurrentEncoded = model.encode(query2, normalize_embeddings=True)
@@ -133,9 +171,6 @@ def get_pathway(job1: str, job2: str):
         new_embed = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
         skillDistance = distance(skillEmbed, new_embed)
         forProcessing["angle"].append(skillDistance)
-
-
-    outputJson(forProcessing, "output/forprocess")
 
 
     # ------------------ PATHS ------------------
@@ -327,7 +362,7 @@ def get_pathway(job1: str, job2: str):
         officialSkill["alignment"] = skillSpine["Alignment Name"]
         officialSkill["connections"] = []
         officialSkill["match"] = False
-        officialSkill["courses"] = rankCourses(officialSkill["courses"], job)
+        officialSkill["courses"] = rankCourses(officialSkill["courses"], job1Index)
         output["categories"]["foundational"][i] = officialSkill
     for i, value in enumerate(output["categories"]["medium"]):
         officialSkill = copy.deepcopy(searchSkill(value))
@@ -336,7 +371,7 @@ def get_pathway(job1: str, job2: str):
         officialSkill["alignment"] = skillSpine["Alignment Name"]
         officialSkill["connections"] = []
         officialSkill["match"] = False
-        officialSkill["courses"] = rankCourses(officialSkill["courses"], job)
+        officialSkill["courses"] = rankCourses(officialSkill["courses"], job1Index)
         output["categories"]["medium"][i] = officialSkill
     for i, value in enumerate(output["categories"]["niche"]):
         officialSkill = copy.deepcopy(searchSkill(value))
@@ -345,7 +380,7 @@ def get_pathway(job1: str, job2: str):
         officialSkill["alignment"] = skillSpine["Alignment Name"]
         officialSkill["connections"] = []
         officialSkill["match"] = False
-        officialSkill["courses"] = rankCourses(officialSkill["courses"], job)
+        officialSkill["courses"] = rankCourses(officialSkill["courses"], job1Index)
         output["categories"]["niche"][i] = officialSkill
     for i, value in enumerate(output["categories"]["applied_hard"]):
         officialSkill = copy.deepcopy(searchSkill(value))
@@ -354,7 +389,7 @@ def get_pathway(job1: str, job2: str):
         officialSkill["alignment"] = skillSpine["Alignment Name"]
         officialSkill["connections"] = []
         officialSkill["match"] = False
-        officialSkill["courses"] = rankCourses(officialSkill["courses"], job)
+        officialSkill["courses"] = rankCourses(officialSkill["courses"], job1Index)
         output["categories"]["applied_hard"][i] = officialSkill
 
     offLearningRate = 0
@@ -410,9 +445,6 @@ def get_pathway(job1: str, job2: str):
             closestNode["connections"].append(skill)
     #official skill = object we will send through GET request
 
-    outputJson(skillNet, "skillnet.json")
-
-
     nodes = []
     edges = []
     visited = []
@@ -441,10 +473,7 @@ def get_pathway(job1: str, job2: str):
             if skill["skill_name"] == node["skill_name"]:
                 node["match"] = True
 
-
-
-                
-        return export
+    return export
     #for skill in jobSkills:
     # for course in skill["courses"]:
             #check to see course
@@ -452,4 +481,9 @@ def get_pathway(job1: str, job2: str):
         #       commonOccurring[course["course_title"]] = commonOccurring[course["course_title"]] + 1
         #  else:
         #     commonOccurring[course["course_title"]] = 1
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
 

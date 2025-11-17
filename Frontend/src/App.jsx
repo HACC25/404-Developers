@@ -9,6 +9,7 @@ import 'vis-network/styles/vis-network.css';
 // --- END VIS-NETWORK IMPORTS ---
 
 import styles from './App.module.css';
+import { getPathway, getAvailableJobs } from './services/api';
 
 // --- PAGE CONSTANTS ---
 const PAGE_HOME = 'home';
@@ -22,95 +23,6 @@ const PAGE_TITLES = {
   [PAGE_BASIC]: 'Basic Course Map',
   [PAGE_STATS]: 'Career Stats Comparison',
 };
-
-// Mock BLS Job Titles for demonstration
-const MOCK_BLS_JOB_TITLES = [
-  'Software Developers',
-  'Data Scientists',
-  'Computer Systems Analysts',
-  'Financial Analysts',
-  // Note: 'Data Analysis Method Development' is a skill, but we keep the mock job titles here.
-];
-
-const MOCK_JOB_SKILLS = {
-  'Software Developers': [
-    'Describe the Visual Elements of Design',
-    'Employ Digital Visual Tools',
-    'Apply Visual Design Principles',
-    'Create Storyboards with Technology'
-  ],
-  'Computer Systems Analysts': [
-    'Describe the Visual Elements of Design',
-    'Instructional Design and Technology Application',
-    'Design Curriculum within Technology Requirements'
-  ],
-  'Financial Analysts': [
-    'Describe the Visual Elements of Design',
-    'Apply Visual Design Principles'
-  ],
-  'Data Scientists': []
-};
-
-// --- MOCK BLS STATS DATA ---
-const MOCK_BLS_STATS = {
-  'Software Developers': {
-    wage: '$130,160',
-    jobs: '1,800,000',
-    growth: '25%', 
-    education: 'Bachelor\'s Degree',
-  },
-  'Data Scientists': {
-    wage: '$103,500',
-    jobs: '179,000',
-    growth: '35%', 
-    education: 'Master\'s Degree',
-  },
-  'Computer Systems Analysts': {
-    wage: '$102,280',
-    jobs: '619,000',
-    growth: '10%',
-    education: 'Bachelor\'s Degree',
-  },
-  'Financial Analysts': {
-    wage: '$99,880',
-    jobs: '360,000',
-    growth: '8%',
-    education: 'Bachelor\'s Degree',
-  },
-};
-const getJobStats = (jobTitle) => MOCK_BLS_STATS[jobTitle] || null;
-
-// Helper to strip non-numeric characters for comparison
-const parseNumericValue = (str) => {
-    if (!str) return 0;
-    const numericStr = str.replace(/[$,%,A-Za-z\s]/g, '');
-    return parseFloat(numericStr);
-};
-
-
-// Logic to determine which role has the superior value (used for highlighting)
-const determineHighlightStatus = (key, currentValue, dreamValue) => {
-    if (!currentValue || !dreamValue) {
-        return { currentHighlight: false, dreamHighlight: false };
-    }
-    if (key === 'education') {
-        return { currentHighlight: false, dreamHighlight: false };
-    }
-    const numCurrent = parseNumericValue(currentValue);
-    const numDream = parseNumericValue(dreamValue);
-    let currentIsWinner = false;
-    let dreamIsWinner = false;
-    if (numCurrent > numDream) {
-        currentIsWinner = true;
-    } else if (numDream > numCurrent) {
-        dreamIsWinner = true;
-    }
-    return { 
-        currentHighlight: currentIsWinner, 
-        dreamHighlight: dreamIsWinner 
-    };
-};
-
 
 // --- RAW JSON DATA FROM BACKEND ---
 // This constant has been updated with the new JSON data provided by your developer.
@@ -550,32 +462,67 @@ const RAW_DATA_ANALYST_PATH = {
 };
 
 // --- HELPER FUNCTION TO PROCESS RAW DATA INTO VIS-NETWORK FORMAT ---
-const processGraphData = (rawData, currentJobSkills = []) => {
+const processGraphData = (rawData, currentJobSkills = [], dreamJob = '') => {
+    console.log('processGraphData called with:', rawData, 'dream job:', dreamJob);
+    
+    // Defensive checks
+    if (!rawData || !rawData.nodes || !rawData.edges) {
+        console.error('processGraphData: Invalid data structure:', rawData);
+        return null;
+    }
+    
+    if (rawData.error) {
+        console.error('processGraphData: Backend returned error:', rawData.error);
+        return null;
+    }
+    
+    if (rawData.nodes.length === 0 || rawData.edges.length === 0) {
+        console.warn('processGraphData: No nodes or edges in response');
+        return null;
+    }
+    
     // Find the actual start and goal IDs based on the first and last skill in the path
     const startId = rawData.edges[0]?.from || '';
     const goalId = rawData.edges[rawData.edges.length - 1]?.to || '';
 
     const nodes = rawData.nodes
-        .filter(node => node.id !== 'root') // Filter out the utility 'root' node
         .map(node => {  
             const isCurrentSkill = currentJobSkills.includes(node.skill_name);
+            const hasMatch = node.match === true; // Check if node has match property set to true
             
             let color = { border: '#008751', background: '#000000' }; // Default Skill/Course Green
             // Replace spaces with newlines to prevent excessively wide nodes
             let label = node.skill_name.replace(/ /g, '\n'); 
             let shape = 'box';
+            let size = 25; // Default size
 
-            if (node.id === startId) {
+            // Root node - special styling (central hub for snowflake)
+            if (node.id === 'root') {
+                color = { border: '#39FF14', background: '#001a00' }; // Bright neon green for dream job
+                label = dreamJob ? `${dreamJob}\n🎯 DREAM ROLE` : 'DREAM\nROLE';
+                shape = 'star';
+                size = 40; // Make root larger and more prominent
+            } 
+            // Nodes with match property - highlight in yellow/gold
+            else if (hasMatch) {
+                color = { border: '#FFD700', background: '#333300' }; // Gold for matched skills from current job
+                label = `${node.skill_name}\n⭐ Current Skills`;
+                shape = 'box';
+                size = 28;
+            }
+            else if (node.id === startId) {
                 // If this is the starting skill in the path
                 color = { border: '#C0C0C0', background: '#000000' }; // Silver/Current Role style
                 label = `${node.skill_name}\n(Start Skill)`; 
                 shape = 'box';
-            } else if (node.id === goalId) {
+            } 
+            else if (node.id === goalId) {
                 // If this is the final skill in the path
                 color = { border: '#39FF14', background: '#000000' }; // Neon Green/Dream Role style
                 label = `${node.skill_name}\n(Goal Skill)`; 
                 shape = 'star'; // Use a star shape for the goal
-            }  else if (isCurrentSkill) {
+            }  
+            else if (isCurrentSkill) {
                 color = { border: '#FFD700', background: '#1a1a00' };
                 label = `${node.skill_name}\n✓ Already Have`; 
                 shape = 'box';
@@ -586,43 +533,28 @@ const processGraphData = (rawData, currentJobSkills = []) => {
                 label: label,
                 shape: shape,
                 color: color,
+                size: size,
                 // The title will show the original skill name on hover
                 title: node.skill_name,
                 // Store the full node data for access when clicked
                 description: node.description || 'No description available.',
                 courses: node.courses ? node.courses.map(c => `${c.course_prefix} ${c.course_number} - ${c.course_title}`) : [], // Extract and format courses from the new data structure
-                isCurrentSkill: isCurrentSkill
+                isCurrentSkill: isCurrentSkill,
+                hasMatch: hasMatch
             };
         });
 
     const edges = rawData.edges
-        // Filter out edges connecting from the utility 'root' node
-        .filter(edge => edge.from !== 'root')
         .map(edge => ({
             from: edge.from,
             to: edge.to,
             color: { color: '#008751' }
         }));
 
-    return { nodes, edges, rawNodes: rawData.nodes };
+    const result = { nodes, edges, rawNodes: rawData.nodes };
+    console.log('processGraphData: Returning processed data with', nodes.length, 'nodes and', edges.length, 'edges');
+    return result;
 };
-
-// --- MOCK GRAPH DATA (Including the new complex path) ---
-const MOCK_GRAPH_DATA = {
-    // Default graph to show when no specific path is selected
-    default: {
-        nodes: [
-            { id: 'start', label: 'Submit Roles', color: { border: '#C0C0C0', background: '#000' }, x: -100, y: 0 },
-            { id: 'goal', label: 'View Path', color: { border: '#39FF14', background: '#000' }, x: 100, y: 0 },
-        ],
-        edges: [
-            { from: 'start', to: 'goal', color: { color: '#008751' } }
-        ]
-    },
-    // The new complex path using the JSON data, triggered by the roles.
-    'Software Developers-Data Scientists': (currentJobSkills) => processGraphData(RAW_DATA_ANALYST_PATH, currentJobSkills),
-};
-
 
 // --- NAVIGATION COMPONENT ---
 const Navigation = ({ currentPage, setCurrentPage, styles }) => {
@@ -677,22 +609,23 @@ const HomePage = ({ styles, setCurrentPage }) => {
 // --- JOB INPUT HEADER (Shared component for Complex and Basic Maps) ---
 const JobInputHeader = ({
   styles,
-  currentJob,
-  dreamJob,
-  currentJobIsSubmitted,
-  dreamJobIsSubmitted,
-  handleCurrentJobChange,
-  handleDreamJobChange,
-  handleSubmission,
-  handleRevertSubmission,
-  currentSuggestions,
-  dreamSuggestions,
-  isCurrentFocused,
-  isDreamFocused,
+  job1,
+  job2,
+  job1Submitted,
+  job2Submitted,
+  handleJob1Change,
+  handleJob2Change,
+  handleGetPathway,
+  job1Suggestions,
+  job2Suggestions,
+  isJob1Focused,
+  isJob2Focused,
   renderSuggestions,
-  renderSubmitButton,
-  setIsCurrentFocused,
-  setIsDreamFocused,
+  setIsJob1Focused,
+  setIsJob2Focused,
+  setJob1Suggestions,
+  setJob2Suggestions,
+  filterSuggestions,
   pageTitle, 
 }) => (
   <header className={styles.headerContainer}>
@@ -704,42 +637,57 @@ const JobInputHeader = ({
     <div className={styles.inputSection}>
       
       <div className={styles.inputGroup}>
-        <label htmlFor="dream-job" className={styles.inputLabel}>
-          Dream Role (BLS Match)
+        <label htmlFor="job1" className={styles.inputLabel}>
+          Job 1 (Current Role)
         </label>
         <input
-          id="dream-job"
+          id="job1"
           type="text"
-          value={dreamJob}
-          onChange={handleDreamJobChange}
-          onFocus={() => setIsDreamFocused(true)}
-          onBlur={() => setTimeout(() => setIsDreamFocused(false), 150)}
-          placeholder="e.g., Data Scientists"
-          className={`${styles.inputField} ${dreamJobIsSubmitted ? styles.submitted : ''}`}
-          disabled={dreamJobIsSubmitted}
+          value={job1}
+          onChange={handleJob1Change}
+          onFocus={() => {
+            console.log(`job1 input focused, job1="${job1}"`);
+            setIsJob1Focused(true);
+            setJob1Suggestions(filterSuggestions(job1));
+          }}
+          onBlur={() => setIsJob1Focused(false)}
+          placeholder="e.g., Software Developers"
+          className={styles.inputField}
+          disabled={job1Submitted}
         />
-        {isDreamFocused && dreamSuggestions.length > 0 && !dreamJobIsSubmitted && renderSuggestions(dreamSuggestions, 'dream')}
-        {renderSubmitButton('dream')}
+        {isJob1Focused && !job1Submitted && renderSuggestions(job1Suggestions, 'job1')}
       </div>
 
       <div className={styles.inputGroup}>
-        <label htmlFor="current-job" className={styles.inputLabel}>
-          Current Role (BLS Match)
+        <label htmlFor="job2" className={styles.inputLabel}>
+          Job 2 (Dream Role)
         </label>
         <input
-          id="current-job"
+          id="job2"
           type="text"
-          value={currentJob}
-          onChange={handleCurrentJobChange}
-          onFocus={() => setIsCurrentFocused(true)}
-          onBlur={() => setTimeout(() => setIsCurrentFocused(false), 150)}
-          placeholder="e.g., Software Developers"
-          className={`${styles.inputField} ${currentJobIsSubmitted ? styles.submitted : ''}`}
-          disabled={currentJobIsSubmitted}
+          value={job2}
+          onChange={handleJob2Change}
+          onFocus={() => {
+            console.log(`job2 input focused, job2="${job2}"`);
+            setIsJob2Focused(true);
+            setJob2Suggestions(filterSuggestions(job2));
+          }}
+          onBlur={() => setIsJob2Focused(false)}
+          placeholder="e.g., Data Scientists"
+          className={styles.inputField}
+          disabled={job2Submitted}
         />
-        {isCurrentFocused && currentSuggestions.length > 0 && !currentJobIsSubmitted && renderSuggestions(currentSuggestions, 'current')}
-        {renderSubmitButton('current')}
+        {isJob2Focused && !job2Submitted && renderSuggestions(job2Suggestions, 'job2')}
       </div>
+
+      <button 
+        className={styles.submitButton}
+        onClick={handleGetPathway}
+        disabled={!job1 || !job2}
+        style={{ marginTop: '1rem' }}
+      >
+        Get Pathway
+      </button>
     </div>
 
   </header>
@@ -752,6 +700,7 @@ const VisNetworkGraph = ({ data, onNodeClick }) => {
     // A ref to attach to the DOM element
     const visJsRef = useRef(null);
     const networkRef = useRef(null); // Ref for the network instance
+    const dataRef = useRef(null); // Ref to track data changes
 
     // Function to handle resize and fit the network
     const fitNetwork = useCallback(() => {
@@ -761,31 +710,53 @@ const VisNetworkGraph = ({ data, onNodeClick }) => {
     }, []);
 
     useEffect(() => {
-        // CRITICAL CHECK: Ensure both required classes are available.
+        // CRITICAL CHECK: Ensure both required classes are available and data exists.
+        if (!data || !data.nodes || !data.edges) {
+            console.warn("VisNetworkGraph: Waiting for data...");
+            return;
+        }
+
         if (!visJsRef.current || !DataSet || !Network) {
             console.error("VIS-NETWORK ERROR: DataSet or Network components are missing.");
             console.warn("If the error persists, you may need to install the 'vis-data' package.");
             return; 
         }
 
+        // Check if data has actually changed - if the same data is passed, don't rebuild
+        const dataChanged = dataRef.current !== data;
+        if (!dataChanged && networkRef.current) {
+            console.log("VisNetworkGraph: Data unchanged, skipping rebuild");
+            return;
+        }
+        dataRef.current = data;
+
         // Create DataSet instances using the imported DataSet class
         const nodes = new DataSet(data.nodes); 
         const edges = new DataSet(data.edges);
 
-        // Define options to match your CRT theme
+        // Define options to match your CRT theme with radial/snowflake layout
         const options = {
             layout: {
-                // Hierarchical layout is better for directed graphs like this one
-                hierarchical: {
-                    enabled: true,
-                    direction: 'LR', // Left-to-Right layout
-                    sortMethod: 'directed',
-                    levelSeparation: 150, // Space between levels
-                    nodeSpacing: 100, // Space between nodes in the same level
-                },
+                // Use force-directed layout for web/snowflake appearance
+                randomSeed: 42, // For consistent layout across reloads
             },
             physics: {
-                enabled: false, // Disable physics for a static layout
+                enabled: true,
+                stabilization: {
+                    iterations: 500,
+                    fit: true,
+                    updateInterval: 25,
+                },
+                barnesHut: {
+                    gravitationalConstant: -26000,
+                    centralGravity: 0.5,
+                    springLength: 250,
+                    springConstant: 0.08,
+                },
+                minVelocity: 0.1,
+                solver: 'barnesHut',
+                timestep: 0.5,
+                adaptiveTimestep: true,
             },
             nodes: {
                 shape: 'box',
@@ -844,6 +815,11 @@ const VisNetworkGraph = ({ data, onNodeClick }) => {
                     onNodeClick(nodeData);
                 }
             }
+            // Prevent any default behavior or propagation
+            if (params.event) {
+                params.event.preventDefault();
+                params.event.stopPropagation();
+            }
         });
 
         // Fit the network to the canvas immediately after creation
@@ -862,7 +838,7 @@ const VisNetworkGraph = ({ data, onNodeClick }) => {
                 networkRef.current = null;
             }
         };
-    }, [data, fitNetwork, onNodeClick]); // Re-run effect if data changes
+    }, [data?.nodes.length, data?.edges.length, fitNetwork, onNodeClick]); // Only re-run if data size changes
 
     // Set a specific height and width for the graph container
     return (
@@ -880,38 +856,72 @@ const VisNetworkGraph = ({ data, onNodeClick }) => {
 
 
 // --- COMPLEX MAP CONTENT (Displays the Course & Skill Map Visualization) ---
-const ComplexMapContent = ({ styles, submittedCurrentJob, submittedDreamJob }) => {
+const ComplexMapContent = ({ styles, job1, job2 }) => {
     const [selectedNode, setSelectedNode] = useState(null);
-    const isSubmitted = submittedCurrentJob && submittedDreamJob;
+    const [graphData, setGraphData] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+    
+    const isSubmitted = job1 && job2;
     const data = {
         title: "Complex Course & Skill Map",
         description: "This map visualizes the optimal path, showing the skills you need to acquire and the associated elective courses required to move from your Current Role to your Dream Role."
     };
 
-    const currentJobSkills = MOCK_JOB_SKILLS[submittedCurrentJob] || [];
+    // Use useMemo to keep currentJobSkills stable across re-renders
+    const currentJobSkills = React.useMemo(() => [], []);
 
-    // --- Logic to select the correct graph data ---
-    let graphData;
-    // Key is generated from submitted roles
-    const dataKey = `${submittedCurrentJob}-${submittedDreamJob}`; 
+    // Fetch pathway data when jobs are submitted
+    useEffect(() => {
+        console.log('ComplexMapContent useEffect triggered:', { isSubmitted, job1, job2 });
+        if (isSubmitted) {
+            const fetchPathway = async () => {
+                console.log(`ComplexMapContent: Fetching pathway for ${job1} -> ${job2}`);
+                setLoading(true);
+                setError(null);
+                setGraphData(null);
+                try {
+                    const response = await getPathway(job1, job2);
+                    console.log('ComplexMapContent: Got response:', response);
+                    if (response.error) {
+                        throw new Error(response.error);
+                    }
+                    const processedData = processGraphData(response, currentJobSkills, job2);
+                    console.log('ComplexMapContent: Processed data:', processedData);
+                    if (processedData) {
+                        setGraphData(processedData);
+                        console.log('ComplexMapContent: GraphData state updated successfully');
+                    } else {
+                        throw new Error('processGraphData returned null');
+                    }
+                } catch (err) {
+                    console.error('Error fetching pathway:', err);
+                    setError(err.message || 'Failed to fetch pathway data from backend');
+                }
+                setLoading(false);
+            };
+            
+            fetchPathway();
+        }
+    }, [isSubmitted, job1, job2]);
 
-    if (isSubmitted && MOCK_GRAPH_DATA[dataKey]) {
-        // Use the new complex data if the specific combination is selected
-        graphData = typeof MOCK_GRAPH_DATA[dataKey] === 'function' 
-            ? MOCK_GRAPH_DATA[dataKey](currentJobSkills)
-            : MOCK_GRAPH_DATA[dataKey];
-    } else if (isSubmitted) {
-        // If roles are submitted but no specific path exists, use a default map 
-        graphData = MOCK_GRAPH_DATA.default; 
-    } else {
-        // If roles are not submitted, show the placeholder text
+    const handleNodeClick = useCallback((nodeData) => {
+        setSelectedNode(nodeData);
+    }, []);
+
+    const closePanel = useCallback(() => {
+        setSelectedNode(null);
+    }, []);
+    
+    // Awaiting role submissions - show placeholder
+    if (!isSubmitted) {
         const placeholderContent = (
             <div style={{ textAlign: 'center', padding: '4rem 0' }}>
                 <p style={{color: 'gray', fontSize: '1.2rem', margin: 0}}>
                     Awaiting Role Submissions
                 </p>
                 <p style={{color: 'var(--silver)', fontSize: '1rem', marginTop: '0.5rem'}}>
-                    Try submitting **"Software Developers"** as your Current Role and **"Data Scientists"** as your Dream Role to view the new path.
+                    Submit your Current Role and Dream Role in the header above to view the skill pathway.
                 </p>
             </div>
         );
@@ -939,7 +949,7 @@ const ComplexMapContent = ({ styles, submittedCurrentJob, submittedDreamJob }) =
                     </p>
                 </div>
 
-                {/* Legend - ADD THIS HERE */}
+                {/* Legend */}
                 <div style={{ width: '100%', display: 'flex', justifyContent: 'center', gap: '2rem', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.8rem' }}>
                     <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
                         <div style={{ width: '20px', height: '20px', border: '2px solid #FFD700', backgroundColor: '#1a1a00' }}></div>
@@ -958,8 +968,8 @@ const ComplexMapContent = ({ styles, submittedCurrentJob, submittedDreamJob }) =
                 {/* --- GRAPH AREA --- */}
                 <div style={{
                     width: '100%', 
-                    border: '2px solid var(--uh-green)', // Use your CRT border
-                    boxShadow: '0 0 15px rgba(0, 135, 81, 0.4)', // Use your CRT glow
+                    border: '2px solid var(--uh-green)',
+                    boxShadow: '0 0 15px rgba(0, 135, 81, 0.4)',
                     borderRadius: '0',
                     backgroundColor: 'rgba(0, 0, 0, 0.2)'
                 }}>
@@ -968,15 +978,102 @@ const ComplexMapContent = ({ styles, submittedCurrentJob, submittedDreamJob }) =
             </div>
         );
     }
-    // --- End graph data logic ---
+    
+    // Loading state
+    if (loading) {
+        return (
+            <div className={styles.mainContent} style={{
+                padding: '2rem',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: '2rem',
+                maxWidth: '90rem',
+                minHeight: '40vh' 
+            }}>
+                <div style={{width: '100%', textAlign: 'center', marginBottom: '1rem'}}>
+                    <h1 style={{
+                        fontSize: '2rem',
+                        color: 'var(--bright-white)',
+                        marginBottom: '0.5rem',
+                        textShadow: '1px 1px 0 var(--uh-green)'
+                    }}>
+                        {data.title}
+                    </h1>
+                    <p className={styles.homeSubtitle} style={{textAlign: 'center', margin: '0', fontSize: '1rem', color: 'var(--silver)'}}>
+                        {data.description}
+                    </p>
+                </div>
 
-    const handleNodeClick = (nodeData) => {
-        setSelectedNode(nodeData);
-    };
+                <div style={{
+                    width: '100%', 
+                    border: '2px solid var(--uh-green)',
+                    boxShadow: '0 0 15px rgba(0, 135, 81, 0.4)',
+                    borderRadius: '0',
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '400px'
+                }}>
+                    <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+                        <p style={{color: 'var(--uh-green)', fontSize: '1.2rem', margin: 0, animation: 'pulse 1s infinite'}}>
+                            ▌ Loading pathway...
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // Error state
+    if (error) {
+        return (
+            <div className={styles.mainContent} style={{
+                padding: '2rem',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: '2rem',
+                maxWidth: '90rem',
+                minHeight: '40vh' 
+            }}>
+                <div style={{width: '100%', textAlign: 'center', marginBottom: '1rem'}}>
+                    <h1 style={{
+                        fontSize: '2rem',
+                        color: 'var(--bright-white)',
+                        marginBottom: '0.5rem',
+                        textShadow: '1px 1px 0 var(--uh-green)'
+                    }}>
+                        {data.title}
+                    </h1>
+                    <p className={styles.homeSubtitle} style={{textAlign: 'center', margin: '0', fontSize: '1rem', color: 'var(--silver)'}}>
+                        {data.description}
+                    </p>
+                </div>
 
-    const closePanel = () => {
-        setSelectedNode(null);
-    };
+                <div style={{
+                    width: '100%', 
+                    border: '2px solid #ff0000',
+                    boxShadow: '0 0 15px rgba(255, 0, 0, 0.4)',
+                    borderRadius: '0',
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)'
+                }}>
+                    <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+                        <p style={{color: '#ff0000', fontSize: '1.2rem', margin: 0}}>
+                            ⚠ Error Loading Pathway
+                        </p>
+                        <p style={{color: 'var(--silver)', fontSize: '0.9rem', marginTop: '0.5rem'}}>
+                            {error}
+                        </p>
+                        <p style={{color: 'var(--silver)', fontSize: '0.8rem', marginTop: '1rem'}}>
+                            Make sure the backend server is running at http://localhost:8000
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // Success state - render graph
     
     return (
         <div className={styles.mainContent} style={{
@@ -1022,7 +1119,15 @@ const ComplexMapContent = ({ styles, submittedCurrentJob, submittedDreamJob }) =
                                 {selectedNode.title || selectedNode.label}
                                 {selectedNode.isCurrentSkill && <span style={{ color: '#FFD700', marginLeft: '0.5rem', fontSize: '0.8rem' }}>✓</span>}
                             </h3>
-                            <button className={styles.closePanelButton} onClick={closePanel}>
+                            <button 
+                                type="button" 
+                                className={styles.closePanelButton} 
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    closePanel();
+                                }}
+                            >
                                 ✕
                             </button>
                         </div>
@@ -1130,86 +1235,27 @@ const BasicMapContent = ({ styles }) => {
 
 
 // --- JOB STATS CONTENT COMPONENT (UPDATED) ---
-const JobStatsContent = ({ styles, submittedCurrentJob, submittedDreamJob }) => {
+const JobStatsContent = ({ styles, job1, job2 }) => {
     const data = {
         title: "BLS Career Outlook Comparison",
         description: "Compare key statistics from the Bureau of Labor Statistics for your current and dream roles."
     };
-
-    const currentStats = getJobStats(submittedCurrentJob);
-    const dreamStats = getJobStats(submittedDreamJob);
     
-    const isSubmitted = submittedCurrentJob && submittedDreamJob;
-
-    const statRows = [
-        { label: 'Median Annual Wage', key: 'wage' },
-        { label: 'Projected Job Growth (2022-32)', key: 'growth' },
-        { label: 'Total Number of Jobs', key: 'jobs' },
-        { label: 'Typical Entry-Level Education', key: 'education' },
-    ];
-    
-    const hasData = currentStats && dreamStats;
+    const isSubmitted = job1 && job2;
 
     const placeholderContent = isSubmitted ? (
-        hasData ? (
-            <div style={{ width: '100%', overflowX: 'auto', display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center' }}>
-                <table className={styles.statsTable}>
-                    <thead>
-                        <tr>
-                            <th className={styles.statHeader}>Metric</th>
-                            <th className={styles.statHeader}>{submittedCurrentJob}</th>
-                            <th className={styles.statHeader}>{submittedDreamJob}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {statRows.map(row => {
-                            const highlightStatus = determineHighlightStatus(
-                                row.key, 
-                                currentStats[row.key], 
-                                dreamStats[row.key]
-                            );
-                            
-                            return (
-                                <tr key={row.key} className={styles.statRow}>
-                                    <td className={styles.statLabel}>
-                                        {row.label}
-                                    </td>
-                                    <td 
-                                        className={`${styles.statValue} ${highlightStatus.currentHighlight ? styles.highlightedValue : ''}`}
-                                    >
-                                        {currentStats[row.key]}
-                                    </td>
-                                    <td 
-                                        className={`${styles.statValue} ${highlightStatus.dreamHighlight ? styles.highlightedValue : ''}`}
-                                    >
-                                        {dreamStats[row.key]}
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-                <p className={styles.statNote}>
-                    Note: Data is simulated for demonstration and based on mock BLS reporting.
-                </p>
-            </div>
-        ) : (
-            <div style={{ textAlign: 'center', padding: '4rem 0' }}>
-                <p style={{color: 'gray', fontSize: '1.2rem', margin: 0}}>
-                    Role data not found in mock database.
-                </p>
-                <p style={{color: 'var(--silver)', fontSize: '1rem', marginTop: '0.5rem'}}>
-                    Please try the mock roles like **"Software Developers"** or **"Data Scientists."**
-                </p>
-            </div>
-        )
+        <div style={{ width: '100%', overflowX: 'auto', display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center' }}>
+            <p style={{color: 'var(--silver)', fontSize: '1rem', marginTop: '0.5rem'}}>
+                Stats feature coming soon - currently showing pathway data.
+            </p>
+        </div>
     ) : (
         <div style={{ textAlign: 'center', padding: '4rem 0' }}>
             <p style={{color: 'gray', fontSize: '1.2rem', margin: 0}}>
                 Awaiting Role Submissions
             </p>
             <p style={{color: 'var(--silver)', fontSize: '1rem', marginTop: '0.5rem'}}>
-                Select and submit your Current Role and Dream Role in the header above to view comparison statistics.
+                Select and submit your Job 1 (Current) and Job 2 (Dream) roles in the header above to view comparison statistics.
             </p>
         </div>
     );
@@ -1239,10 +1285,10 @@ const JobStatsContent = ({ styles, submittedCurrentJob, submittedDreamJob }) => 
             
             <div style={{
                 width: '100%', 
-                border: !hasData ? '2px dashed rgba(255, 255, 255, 0.2)' : 'none', 
+                border: !isSubmitted ? '2px dashed rgba(255, 255, 255, 0.2)' : 'none', 
                 borderRadius: '0',
                 backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                padding: !hasData ? '0' : '0 1rem', 
+                padding: !isSubmitted ? '0' : '0 1rem', 
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
@@ -1257,79 +1303,89 @@ const JobStatsContent = ({ styles, submittedCurrentJob, submittedDreamJob }) => 
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState(PAGE_HOME);
-  const [availableJobTitles, setAvailableJobTitles] = useState([]);
-  const [currentJob, setCurrentJob] = useState('');
-  const [dreamJob, setDreamJob] = useState('');
-  const [submittedCurrentJob, setSubmittedCurrentJob] = useState('');
-  const [submittedDreamJob, setSubmittedDreamJob] = useState('');
-  const [currentSuggestions, setCurrentSuggestions] = useState([]);
-  const [dreamSuggestions, setDreamSuggestions] = useState([]);
-  const [isCurrentFocused, setIsCurrentFocused] = useState(false);
-  const [isDreamFocused, setIsDreamFocused] = useState(false);
+  const [availableJobs, setAvailableJobs] = useState([]);
+  const [job1, setJob1] = useState('');
+  const [job2, setJob2] = useState('');
+  const [job1Submitted, setJob1Submitted] = useState(false);
+  const [job2Submitted, setJob2Submitted] = useState(false);
+  const [job1Suggestions, setJob1Suggestions] = useState([]);
+  const [job2Suggestions, setJob2Suggestions] = useState([]);
+  const [isJob1Focused, setIsJob1Focused] = useState(false);
+  const [isJob2Focused, setIsJob2Focused] = useState(false);
 
+  // Load available job titles from backend
   useEffect(() => {
-    const loadJobTitles = () => {
-      setAvailableJobTitles(MOCK_BLS_JOB_TITLES); 
+    const loadJobs = async () => {
+      try {
+        console.log('Loading jobs from backend...');
+        const jobs = await getAvailableJobs();
+        console.log('Jobs loaded:', jobs.length);
+        console.log('First 5 jobs:', jobs.slice(0, 5));
+        setAvailableJobs(jobs);
+      } catch (error) {
+        console.error('Failed to load jobs:', error);
+        setAvailableJobs([]);
+      }
     };
-    loadJobTitles();
+    loadJobs();
   }, []);
 
-  const isValidJobTitle = useCallback((jobTitle) => {
-      return availableJobTitles.includes(jobTitle);
-  }, [availableJobTitles]);
-
   const filterSuggestions = useCallback((inputValue) => {
-    if (!inputValue) return [];
+    console.log(`filterSuggestions called. availableJobs.length=${availableJobs.length}, inputValue="${inputValue}"`);
+    if (!inputValue) {
+      console.log(`Empty input - returning all ${availableJobs.length} jobs`);
+      return availableJobs;
+    }
     const lowerInput = inputValue.toLowerCase();
-    return availableJobTitles.filter(title => 
+    const filtered = availableJobs.filter(title => 
       title.toLowerCase().includes(lowerInput)
     );
-  }, [availableJobTitles]);
+    console.log(`Filtering "${inputValue}": found ${filtered.length} matches from ${availableJobs.length} total`);
+    return filtered;
+  }, [availableJobs]);
 
   const selectSuggestion = (jobTitle, type) => {
-    if (type === 'current') {
-      setCurrentJob(jobTitle);
-      setCurrentSuggestions([]);
-      setIsCurrentFocused(false);
+    if (type === 'job1') {
+      setJob1(jobTitle);
+      setJob1Suggestions([]);
+      setIsJob1Focused(false);
     } else {
-      setDreamJob(jobTitle);
-      setDreamSuggestions([]);
-      setIsDreamFocused(false);
+      setJob2(jobTitle);
+      setJob2Suggestions([]);
+      setIsJob2Focused(false);
     }
   };
   
-  const handleCurrentJobChange = (e) => {
+  const handleJob1Change = (e) => {
     const value = e.target.value;
-    setCurrentJob(value);
-    setCurrentSuggestions(filterSuggestions(value));
+    setJob1(value);
+    setJob1Suggestions(filterSuggestions(value));
   };
 
-  const handleDreamJobChange = (e) => {
+  const handleJob2Change = (e) => {
     const value = e.target.value;
-    setDreamJob(value);
-    setDreamSuggestions(filterSuggestions(value));
+    setJob2(value);
+    setJob2Suggestions(filterSuggestions(value));
   };
   
-  const handleSubmission = (type) => {
-    if (type === 'current' && currentJob && isValidJobTitle(currentJob)) {
-      setSubmittedCurrentJob(currentJob);
-      setCurrentSuggestions([]);
-    } else if (type === 'dream' && dreamJob && isValidJobTitle(dreamJob)) {
-      setSubmittedDreamJob(dreamJob);
-      setDreamSuggestions([]);
-    }
-  };
-  
-  const handleRevertSubmission = (type) => {
-      if (type === 'current') {
-          setSubmittedCurrentJob('');
-      } else {
-          setSubmittedDreamJob('');
-      }
+  const handleGetPathway = () => {
+    console.log(`handleGetPathway called with job1="${job1}", job2="${job2}"`);
+    setJob1Submitted(job1);
+    setJob2Submitted(job2);
+    console.log(`handleGetPathway: Set submitted states`);
   };
 
   const renderSuggestions = (suggestions, type) => {
-    if (suggestions.length === 0) return null;
+    console.log(`Rendering suggestions for ${type}:`, suggestions.length, suggestions.slice(0, 3));
+    if (suggestions.length === 0) {
+      return (
+        <div className={styles.suggestionsContainer}>
+          <div className={styles.suggestionItem}>
+            No matches found
+          </div>
+        </div>
+      );
+    }
     return (
       <div className={styles.suggestionsContainer}>
         {suggestions.map((title) => (
@@ -1344,60 +1400,29 @@ const App = () => {
       </div>
     );
   };
-  
-  const currentJobIsSubmitted = submittedCurrentJob && submittedCurrentJob === currentJob;
-  const dreamJobIsSubmitted = submittedDreamJob && submittedDreamJob === dreamJob;
-  const currentJobIsValid = isValidJobTitle(currentJob);
-  const dreamJobIsValid = isValidJobTitle(dreamJob);
-
-  const renderSubmitButton = (type) => {
-      const isSubmitted = type === 'current' ? currentJobIsSubmitted : dreamJobIsSubmitted;
-      const isValid = type === 'current' ? currentJobIsValid : dreamJobIsValid;
-      const jobValue = type === 'current' ? currentJob : dreamJob;
-
-      if (isSubmitted) {
-          return (
-              <button 
-                className={`${styles.submitButton} ${styles.changeButton}`}
-                onClick={() => handleRevertSubmission(type)}
-              >
-                Change Role
-              </button>
-          );
-      }
-      
-      return (
-          <button 
-            className={styles.submitButton}
-            onClick={() => handleSubmission(type)}
-            disabled={!jobValue || !isValid}
-          >
-            Submit {type === 'current' ? 'Current' : 'Dream'} Role
-          </button>
-      );
-  };
 
   const renderPageContent = () => {
     const title = PAGE_TITLES[currentPage] || 'Skill Mapper';
     
     const inputHeaderProps = {
         styles,
-        currentJob,
-        dreamJob,
-        currentJobIsSubmitted,
-        dreamJobIsSubmitted,
-        handleCurrentJobChange,
-        handleDreamJobChange,
-        handleSubmission,
-        handleRevertSubmission,
-        currentSuggestions,
-        dreamSuggestions,
-        isCurrentFocused,
-        isDreamFocused,
+        job1,
+        job2,
+        job1Submitted,
+        job2Submitted,
+        handleJob1Change,
+        handleJob2Change,
+        handleGetPathway,
+        job1Suggestions,
+        job2Suggestions,
+        isJob1Focused,
+        isJob2Focused,
         renderSuggestions,
-        renderSubmitButton,
-        setIsCurrentFocused,
-        setIsDreamFocused,
+        setIsJob1Focused,
+        setIsJob2Focused,
+        setJob1Suggestions,
+        setJob2Suggestions,
+        filterSuggestions,
         pageTitle: title,
     };
     
@@ -1411,8 +1436,8 @@ const App = () => {
             <JobInputHeader {...inputHeaderProps} /> 
             <ComplexMapContent 
                 styles={styles} 
-                submittedCurrentJob={submittedCurrentJob} 
-                submittedDreamJob={submittedDreamJob} 
+                job1={job1Submitted ? job1 : ''} 
+                job2={job2Submitted ? job2 : ''} 
             />
           </div>
         );
@@ -1431,8 +1456,8 @@ const App = () => {
                 <JobInputHeader {...inputHeaderProps} />
                 <JobStatsContent 
                     styles={styles} 
-                    submittedCurrentJob={submittedCurrentJob} 
-                    submittedDreamJob={submittedDreamJob} 
+                    job1={job1Submitted ? job1 : ''} 
+                    job2={job2Submitted ? job2 : ''} 
                 />
             </div>
         );
