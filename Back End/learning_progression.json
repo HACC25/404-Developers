@@ -1,0 +1,59 @@
+{
+    "categories": {
+        "foundational": [
+            "Information System Analysis",
+            "Common Problem Analysis",
+            "Information Systems",
+            "Information System Implementation"
+        ],
+        "medium": [
+            "Computer and Computer System Communication",
+            "Data Processing",
+            "Software Systems Objectives Analysis",
+            "Computer Hardware and Software Implementation",
+            "Impact and Risk Analysis",
+            "Information Systems Objectives and Impact Analysis",
+            "Analytical Skills Application",
+            "Analyze Complex Technical Information",
+            "Data System, Network, and Application Implementation",
+            "Network Traffic Analysis"
+        ],
+        "niche": [
+            "Analyze Integration Requirements",
+            "Systems Engineering",
+            "Monitoring Systems Development",
+            "Information System Requirements Development",
+            "Data Analysis Technology Implementation",
+            "User Needs Analysis",
+            "Data Analytic Technique Application",
+            "Hardware and Software Function Description",
+            "Business Systems Implementation",
+            "Business Operations Analysis",
+            "Failed System Analysis",
+            "Information Systems Role Description",
+            "Information Systems Role Description",
+            "Financial Statement Analysis",
+            "Analytical Reasoning Application",
+            "Use Statistical Software To Analyze Data Sets",
+            "Financial Statements Analysis",
+            "Financial Statements Analysis",
+            "Data Architecture Creation",
+            "Monitoring Systems Implementation",
+            "Problem Identification for Analysis"
+        ],
+        "applied_hard": [
+            "Conduct Computer System Security Audits",
+            "Accounting Systems Monitoring",
+            "Perform Analysis",
+            "Financial Statement Decision Making Analysis",
+            "Financial Statements and Ratio Calculations Analysis",
+            "Business Systems Development",
+            "Systems Architecture Principles",
+            "System Architecture Validation",
+            "Troubleshoot Problems via Computer Programming",
+            "Student Information System (SIS) Analysis",
+            "Business Data Analysis",
+            "System Performance Measurement"
+        ]
+    }
+}
