@@ -397,7 +397,7 @@ async def get_pathway(job1: str, job2: str):
     added = []
 
 
-
+#r
 
 
     for skill in output["categories"]["foundational"]:
