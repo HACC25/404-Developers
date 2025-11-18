@@ -3,7 +3,10 @@
  * Handles all communication with the backend at http://localhost:8001
  */
 
-const API_BASE_URL = 'http://localhost:8001';
+// Use same-origin in production (served by FastAPI), localhost port during local dev
+const API_BASE_URL = (typeof window !== 'undefined' && window.location.hostname === 'localhost')
+  ? 'http://localhost:8001'
+  : '';
 
 /**
  * Fetch list of all available job titles from SOC
