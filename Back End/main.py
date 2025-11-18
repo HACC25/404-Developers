@@ -1,12 +1,13 @@
 import json
-from sentence_transformers import SentenceTransformer
 import os
-import faiss
-import numpy as np
-import requests
-import re
+import threading
 import copy
 import math
+import re
+import requests
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,8 @@ app = FastAPI()
 
 # Adjust the path if your folder structure differs
 frontend_dist_path = os.path.join(os.path.dirname(__file__), "../Frontend/dist")
-app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="frontend")
+if os.path.isdir(frontend_dist_path):
+    app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="frontend")
 
 
 # Enable CORS for frontend development server
@@ -27,22 +29,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load model at startup
-print("Initializing SentenceTransformer model...", flush=True)
-model = None
+print("Backend starting – setting up lazy model load thread.", flush=True)
+model = None  # will hold the SentenceTransformer instance
 
 def get_model():
-    """Lazy load the model on first use"""
+    """Lazy load the embedding model; respects EMBEDDING_MODEL env var for smaller production variants."""
     global model
     if model is None:
         try:
-            print("Loading SentenceTransformer model for first time...", flush=True)
-            model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
+            model_name = os.getenv("EMBEDDING_MODEL", "all-mpnet-base-v2")
+            print(f"Loading SentenceTransformer model '{model_name}'...", flush=True)
+            model = SentenceTransformer(model_name, device="cpu")
             print("Model loaded successfully", flush=True)
         except Exception as e:
             print(f"Error loading model: {e}", flush=True)
             raise
     return model
+
+@app.on_event("startup")
+def preload_model_background():
+    """Kick off a background thread to preload the model so first user request doesn't timeout (avoids 502)."""
+    def _load():
+        try:
+            get_model()
+        except Exception:
+            # Already logged inside get_model
+            pass
+    threading.Thread(target=_load, daemon=True).start()
+@app.get("/health")
+async def health():
+    """Lightweight health/readiness endpoint for deployment platform probes."""
+    return {"status": "ok", "model_loaded": model is not None}
 
 @app.get("/jobs")
 async def get_jobs():
