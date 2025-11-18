@@ -32,6 +32,14 @@ app.add_middleware(
 print("Backend starting – setting up lazy model load thread.", flush=True)
 model = None  # will hold the SentenceTransformer instance
 
+# Low-memory controls
+LOW_MEM_MODE = os.getenv("LOW_MEM_MODE", "1") == "1"
+PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "1") == "1"
+try:
+    CHUNK_SIZE = int(os.getenv("EMBEDDING_CHUNK", "2048"))
+except ValueError:
+    CHUNK_SIZE = 2048
+
 def get_model():
     """Lazy load the embedding model; respects EMBEDDING_MODEL env var for smaller production variants."""
     global model
@@ -49,6 +57,9 @@ def get_model():
 @app.on_event("startup")
 def preload_model_background():
     """Kick off a background thread to preload the model so first user request doesn't timeout (avoids 502)."""
+    if not PRELOAD_MODEL:
+        print("PRELOAD_MODEL disabled; model will load on first request.", flush=True)
+        return
     def _load():
         try:
             get_model()
@@ -124,10 +135,53 @@ async def get_pathway(job1: str, job2: str):
     with open("skillOrder.json", "r") as f:
         skills = json.load(f)
 
-    embeddings = np.load("skill_embeddings2.npy")
+    # Load embeddings with minimal memory where possible
+    embeddings = np.load("skill_embeddings2.npy", mmap_mode='r' if LOW_MEM_MODE else None)
 
-    index = faiss.IndexFlatIP(embeddings.shape[1])
-    index.add(embeddings)
+    # Optional FAISS index; in LOW_MEM_MODE, avoid copying full matrix into FAISS to save RAM
+    use_faiss = (not LOW_MEM_MODE)
+    if use_faiss:
+        index = faiss.IndexFlatIP(embeddings.shape[1])
+        index.add(np.array(embeddings, copy=False))
+
+    def top_k_inner_product(query_vec: np.ndarray, emb: np.ndarray, k: int = 300, chunk: int = CHUNK_SIZE):
+        """Memory-friendly top-k by inner product over memmapped embeddings in chunks."""
+        # Ensure 1-D normalized query vector
+        q = query_vec.ravel()
+        # Track global top-k across chunks
+        top_scores = np.full(k, -np.inf, dtype=np.float32)
+        top_indices = np.full(k, -1, dtype=np.int32)
+        n = emb.shape[0]
+        for start in range(0, n, chunk):
+            end = min(start + chunk, n)
+            chunk_mat = emb[start:end]
+            # Compute inner product for the chunk
+            scores = chunk_mat @ q
+            # If embeddings are not unit-normalized, approximate cosine by dividing by row norms
+            # This keeps memory low but costs some compute
+            try:
+                row_norms = np.linalg.norm(chunk_mat, axis=1)
+                # Avoid divide-by-zero
+                row_norms[row_norms == 0] = 1.0
+                scores = scores / row_norms
+            except Exception:
+                # Fall back to raw inner product if norm computation fails
+                pass
+
+            # Merge with existing top-k
+            combined_scores = np.concatenate([top_scores, scores.astype(np.float32, copy=False)])
+            combined_indices = np.concatenate([top_indices, np.arange(start, end, dtype=np.int32)])
+            if combined_scores.size > k:
+                part = np.argpartition(combined_scores, -k)[-k:]
+                # Order these top-k by descending score
+                order = np.argsort(combined_scores[part])[::-1]
+                top_scores = combined_scores[part][order]
+                top_indices = combined_indices[part][order]
+            else:
+                order = np.argsort(combined_scores)[::-1]
+                top_scores = combined_scores[order]
+                top_indices = combined_indices[order]
+        return top_indices.tolist()
 
     query = "Web and Digital Interface Designers: Design digital user interfaces or websites. Develop and test layouts, interfaces, functionality, and navigation menus to ensure compatibility and usability across browsers or devices. May use web framework applications as well as client-side code and processes. May evaluate web design following web and accessibility standards, and may analyze web use metrics and optimize websites for marketability and search engine ranking. May design and test interfaces that facilitate the human-computer interaction and maximize the usability of digital devices, websites, and software with a focus on aesthetics and design. May create graphics used in websites and manage website content and links. Excludes “Special Effects Artists and Animators” (27-1014) and “Graphic Designers” (27-1024)."
 
@@ -142,9 +196,13 @@ async def get_pathway(job1: str, job2: str):
 
 
     if len(queryEncoded.shape) == 1:
-        queryEncoded = queryEncoded.reshape(1, -1)
-        d , i = index.search(queryEncoded, k=300)
-        for idx in i[0]:
+        if use_faiss:
+            q_2d = queryEncoded.reshape(1, -1)
+            d, i = index.search(q_2d, k=300)
+            idx_iter = i[0]
+        else:
+            idx_iter = top_k_inner_product(queryEncoded, embeddings, k=300)
+        for idx in idx_iter:
             #check to see size of node tree
             if len(jobSkills) > 60:
                 break
@@ -160,9 +218,13 @@ async def get_pathway(job1: str, job2: str):
     oldJobSkills = []
 
     if len(queryCurrentEncoded.shape) == 1:
-        queryCurrentEncoded = queryCurrentEncoded.reshape(1, -1)
-        d , i = index.search(queryCurrentEncoded, k=100)
-        for index2 in i[0]:
+        if use_faiss:
+            q2_2d = queryCurrentEncoded.reshape(1, -1)
+            d, i = index.search(q2_2d, k=100)
+            idx_iter2 = i[0]
+        else:
+            idx_iter2 = top_k_inner_product(queryCurrentEncoded, embeddings, k=100)
+        for index2 in idx_iter2:
             skillDict = {}
             skillDict["skill_name"] = skills[index2]
 
@@ -361,7 +423,7 @@ async def get_pathway(job1: str, job2: str):
     root["skill_name"] = "root"
     skillNet.append(root)
 
-    job_embeddings = np.load("job_embeddings.npy")
+    job_embeddings = np.load("job_embeddings.npy", mmap_mode='r' if LOW_MEM_MODE else None)
     with open("detailed_occupations.json", "r", encoding="utf-8") as f:
         job_list = json.load(f)
 
