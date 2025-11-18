@@ -1,9 +1,9 @@
 /**
  * API Service Module
- * Handles all communication with the backend at http://localhost:8000
+ * Handles all communication with the backend at http://localhost:8001
  */
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8001';
 
 /**
  * Fetch list of all available job titles from SOC

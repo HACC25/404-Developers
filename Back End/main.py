@@ -12,6 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+# Adjust the path if your folder structure differs
+frontend_dist_path = os.path.join(os.path.dirname(__file__), "../Frontend/dist")
+app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="frontend")
+
+
 # Enable CORS for frontend development server
 app.add_middleware(
     CORSMiddleware,
