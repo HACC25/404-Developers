@@ -34,11 +34,18 @@ model = None  # will hold the SentenceTransformer instance
 
 # Low-memory controls
 LOW_MEM_MODE = os.getenv("LOW_MEM_MODE", "1") == "1"
-PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "1") == "1"
+# Default to not preloading on tiny servers to avoid OOM at boot; enable explicitly if desired
+PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "0") == "1"
 try:
     CHUNK_SIZE = int(os.getenv("EMBEDDING_CHUNK", "2048"))
 except ValueError:
     CHUNK_SIZE = 2048
+try:
+    TOPK_PRIMARY = int(os.getenv("PATHWAY_TOPK", "150"))
+    TOPK_CURRENT = int(os.getenv("PATHWAY_CURRENT_TOPK", "60"))
+except ValueError:
+    TOPK_PRIMARY = 150
+    TOPK_CURRENT = 60
 
 def get_model():
     """Lazy load the embedding model; respects EMBEDDING_MODEL env var for smaller production variants."""
@@ -198,10 +205,10 @@ async def get_pathway(job1: str, job2: str):
     if len(queryEncoded.shape) == 1:
         if use_faiss:
             q_2d = queryEncoded.reshape(1, -1)
-            d, i = index.search(q_2d, k=300)
+            d, i = index.search(q_2d, k=TOPK_PRIMARY)
             idx_iter = i[0]
         else:
-            idx_iter = top_k_inner_product(queryEncoded, embeddings, k=300)
+            idx_iter = top_k_inner_product(queryEncoded, embeddings, k=TOPK_PRIMARY)
         for idx in idx_iter:
             #check to see size of node tree
             if len(jobSkills) > 60:
@@ -220,10 +227,10 @@ async def get_pathway(job1: str, job2: str):
     if len(queryCurrentEncoded.shape) == 1:
         if use_faiss:
             q2_2d = queryCurrentEncoded.reshape(1, -1)
-            d, i = index.search(q2_2d, k=100)
+            d, i = index.search(q2_2d, k=TOPK_CURRENT)
             idx_iter2 = i[0]
         else:
-            idx_iter2 = top_k_inner_product(queryCurrentEncoded, embeddings, k=100)
+            idx_iter2 = top_k_inner_product(queryCurrentEncoded, embeddings, k=TOPK_CURRENT)
         for index2 in idx_iter2:
             skillDict = {}
             skillDict["skill_name"] = skills[index2]
