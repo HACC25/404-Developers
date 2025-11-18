@@ -817,8 +817,12 @@ const VisNetworkGraph = ({ data, onNodeClick }) => {
             }
             // Prevent any default behavior or propagation
             if (params.event) {
-                params.event.preventDefault();
-                params.event.stopPropagation();
+                if (typeof params.event.preventDefault === 'function') {
+                    params.event.preventDefault();
+                }
+                if (typeof params.event.stopPropagation === 'function') {
+                    params.event.stopPropagation();
+                }
             }
         });
 

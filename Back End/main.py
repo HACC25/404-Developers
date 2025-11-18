@@ -48,6 +48,9 @@ async def get_jobs():
 
 @app.get("/pathway/{job1}/{job2}")
 async def get_pathway(job1: str, job2: str):
+    global model
+    model = get_model()  # Ensure model is loaded before processing
+    
     with open("detailed_occupations.json", "r",  encoding="utf-8") as f:
         jobs = json.load(f)
         job1Index = None
@@ -340,11 +343,12 @@ async def get_pathway(job1: str, job2: str):
         job_list = json.load(f)
 
     def rankCourses(courses, job):
+        m = get_model()  # Get the model (lazy loaded if needed)
         newCourses = []
         highestCourse = {}
         counter = -100
         for course in courses:
-            course_embed = model.encode(f"{course["course_title"]}: {course["course_desc"]}", convert_to_numpy=True, normalize_embeddings=True)
+            course_embed = m.encode(f"{course["course_title"]}: {course["course_desc"]}", convert_to_numpy=True, normalize_embeddings=True)
             distanceOfCourse = distance(job_embeddings[job], course_embed)
             if distanceOfCourse >= 0.5:
                 newCourses.append(course)
