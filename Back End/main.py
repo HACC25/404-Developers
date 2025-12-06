@@ -127,10 +127,10 @@ def _get_pathway_sync(job1: str, job2: str):
     query = "Web and Digital Interface Designers: Design digital user interfaces or websites. Develop and test layouts, interfaces, functionality, and navigation menus to ensure compatibility and usability across browsers or devices. May use web framework applications as well as client-side code and processes. May evaluate web design following web and accessibility standards, and may analyze web use metrics and optimize websites for marketability and search engine ranking. May design and test interfaces that facilitate the human-computer interaction and maximize the usability of digital devices, websites, and software with a focus on aesthetics and design. May create graphics used in websites and manage website content and links. Excludes “Special Effects Artists and Animators” (27-1014) and “Graphic Designers” (27-1024)."
 
     
-    print(f"{jobs[job1Index]["SOC Title"]}: {jobs[job1Index]["SOC Definition"]}")
+    print(f"{jobs[job1Index]['SOC Title']}: {jobs[job1Index]['SOC Definition']}")
 
-    query = f"{jobs[job1Index]["SOC Title"]}: {jobs[job1Index]["SOC Definition"]}"
-    query2 = f"{jobs[job2Index]["SOC Title"]}: {jobs[job2Index]["SOC Definition"]}"
+    query = f"{jobs[job1Index]['SOC Title']}: {jobs[job1Index]['SOC Definition']}"
+    query2 = f"{jobs[job2Index]['SOC Title']}: {jobs[job2Index]['SOC Definition']}"
 
     queryEncoded = get_model().encode(query, normalize_embeddings=True)
     queryCurrentEncoded = get_model().encode(query2, normalize_embeddings=True)
@@ -366,7 +366,7 @@ def _get_pathway_sync(job1: str, job2: str):
         highestCourse = {}
         counter = -100
         for course in courses:
-            course_embed = get_model().encode(f"{course["course_title"]}: {course["course_desc"]}", convert_to_numpy=True, normalize_embeddings=True)
+            course_embed = get_model().encode(f"{course['course_title']}: {course['course_desc']}", convert_to_numpy=True, normalize_embeddings=True)
             distanceOfCourse = distance(job_embeddings[job], course_embed)
             if distanceOfCourse >= 0.5:
                 newCourses.append(course)
