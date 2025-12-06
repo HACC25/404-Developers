@@ -10,47 +10,65 @@ import math
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 
-# Enable CORS for frontend development server
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - do nothing, let requests lazy-load models
+    yield
+    # Shutdown
+
+app = FastAPI(lifespan=lifespan)
+
+# Add CORS middleware to allow frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load model at startup
-print("Initializing SentenceTransformer model...", flush=True)
-model = None
+# Global model - will be loaded on first use
+_model = None
 
 def get_model():
-    """Lazy load the model on first use"""
-    global model
-    if model is None:
-        try:
-            print("Loading SentenceTransformer model for first time...", flush=True)
-            model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
-            print("Model loaded successfully", flush=True)
-        except Exception as e:
-            print(f"Error loading model: {e}", flush=True)
-            raise
-    return model
+    global _model
+    if _model is None:
+        _model = SentenceTransformer("all-mpnet-base-v2")
+    return _model
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {"status": "ok", "service": "pathway-api"}
 
 @app.get("/jobs")
-async def get_jobs():
-    """Get list of all available job titles from SOC"""
-    with open("detailed_occupations.json", "r", encoding="utf-8") as f:
-        jobs = json.load(f)
-    job_titles = [job["SOC Title"] for job in jobs]
-    return {"jobs": job_titles}
+def get_available_jobs():
+    """Get list of all available job titles from detailed_occupations.json"""
+    try:
+        with open("detailed_occupations.json", "r", encoding="utf-8") as f:
+            jobs = json.load(f)
+        job_titles = [job["SOC Title"] for job in jobs]
+        return {"jobs": job_titles, "count": len(job_titles)}
+    except Exception as e:
+        return {"error": str(e), "jobs": [], "count": 0}
 
 @app.get("/pathway/{job1}/{job2}")
 async def get_pathway(job1: str, job2: str):
-    global model
-    model = get_model()  # Ensure model is loaded before processing
+    """Get pathway between two jobs - runs in background thread pool"""
+    from concurrent.futures import ThreadPoolExecutor
+    import concurrent.futures
     
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(executor, lambda: _get_pathway_sync(job1, job2))
+    return result
+
+def _get_pathway_sync(job1: str, job2: str):
     with open("detailed_occupations.json", "r",  encoding="utf-8") as f:
         jobs = json.load(f)
         job1Index = None
@@ -114,8 +132,8 @@ async def get_pathway(job1: str, job2: str):
     query = f"{jobs[job1Index]["SOC Title"]}: {jobs[job1Index]["SOC Definition"]}"
     query2 = f"{jobs[job2Index]["SOC Title"]}: {jobs[job2Index]["SOC Definition"]}"
 
-    queryEncoded = model.encode(query, normalize_embeddings=True)
-    queryCurrentEncoded = model.encode(query2, normalize_embeddings=True)
+    queryEncoded = get_model().encode(query, normalize_embeddings=True)
+    queryCurrentEncoded = get_model().encode(query2, normalize_embeddings=True)
 
 
     if len(queryEncoded.shape) == 1:
@@ -171,7 +189,7 @@ async def get_pathway(job1: str, job2: str):
     for skill in skillListImportance:
         forProcessing["importance"].append(skill)
         skillEmbed = embeddings[objectiveSkillIndex(skill)]
-        new_embed = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
+        new_embed = get_model().encode(query, convert_to_numpy=True, normalize_embeddings=True)
         skillDistance = distance(skillEmbed, new_embed)
         forProcessing["angle"].append(skillDistance)
 
@@ -348,7 +366,7 @@ async def get_pathway(job1: str, job2: str):
         highestCourse = {}
         counter = -100
         for course in courses:
-            course_embed = m.encode(f"{course["course_title"]}: {course["course_desc"]}", convert_to_numpy=True, normalize_embeddings=True)
+            course_embed = get_model().encode(f"{course["course_title"]}: {course["course_desc"]}", convert_to_numpy=True, normalize_embeddings=True)
             distanceOfCourse = distance(job_embeddings[job], course_embed)
             if distanceOfCourse >= 0.5:
                 newCourses.append(course)
